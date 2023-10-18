@@ -6,7 +6,7 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
-use std::io::{Cursor};
+use std::io::Cursor;
 use std::net::IpAddr;
 
 use byteorder::{BigEndian, ReadBytesExt};
@@ -15,6 +15,8 @@ use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::Packet;
 use thiserror::Error;
+
+use crate::ErspanError::NumbersParsingError;
 
 mod tests;
 
@@ -74,6 +76,9 @@ pub enum ErspanError {
 
     #[error("GRE with routing option not implemented yet")]
     GreWithRoutingNotImplemented,
+
+    #[error("Numbers parsing error")]
+    NumbersParsingError,
 }
 
 pub fn erspan_decap(erspan_packet: &[u8]) -> Result<ErspanHeader, ErspanError> {
@@ -119,7 +124,6 @@ fn handle_transport_protocol(
 
 
 pub fn handle_gre_packet(source: IpAddr, destination: IpAddr, packet: &[u8]) -> Result<ErspanHeader, ErspanError> {
-
     let min_gre_headers_size = 16;
 
     if packet.len() < min_gre_headers_size {
@@ -129,20 +133,20 @@ pub fn handle_gre_packet(source: IpAddr, destination: IpAddr, packet: &[u8]) -> 
 
     // GRE header
     let mut rdr = Cursor::new(&packet);
-    let flags = rdr.read_u16::<BigEndian>().unwrap();
+    let flags = rdr.read_u16::<BigEndian>().map_err(|_| NumbersParsingError)?;
     let checksum_flag = (flags & 0b1000_0000_0000_0000) > 0;
     let routing_flag = (flags & 0b100_0000_0000_0000) > 0;
     let key_flag = (flags & 0b10_0000_0000_0000) > 0;
     let sequence_num_flag = (flags & 0b1_0000_0000_0000) > 0;
     let gre_version = (flags & 0b111) as u8;
 
-    let proto_type = rdr.read_u16::<BigEndian>().unwrap();
+    let proto_type = rdr.read_u16::<BigEndian>().map_err(|_| NumbersParsingError)?;
     if proto_type != 0x88be && proto_type != 0x22EB {   // ERSPAN packet type constant
         return Err(ErspanError::InvalidGrePacketType);
     }
 
     let checksum = if checksum_flag {
-        Some(rdr.read_u16::<BigEndian>().unwrap())
+        rdr.read_u16::<BigEndian>().ok()
     } else {
         None
     };
@@ -152,60 +156,60 @@ pub fn handle_gre_packet(source: IpAddr, destination: IpAddr, packet: &[u8]) -> 
     }
 
     let key = if key_flag {
-        Some(rdr.read_u32::<BigEndian>().unwrap())
+        rdr.read_u32::<BigEndian>().ok()
     } else {
         None
     };
 
     let seq = if sequence_num_flag {
-        Some(rdr.read_u32::<BigEndian>().unwrap())
+        rdr.read_u32::<BigEndian>().ok()
     } else {
         None
     };
 
     // start of ERSPAN header
-    let version_and_vlan = rdr.read_u16::<BigEndian>().unwrap();
+    let version_and_vlan = rdr.read_u16::<BigEndian>().map_err(|_| NumbersParsingError)?;
     let version_num = version_and_vlan >> 12;
     let mut gre_headers_size = 8 + 8;  // gre + erspan headers
     let version = match version_num {
         0 => {
             gre_headers_size = 8 + 8;  // gre + erspan headers
             ErspanType::Type1
-        },
+        }
         1 => {
             gre_headers_size = 8 + 8;  // gre + erspan headers
             ErspanType::Type2
-        },
+        }
         2 => {
             gre_headers_size = 8 + 12;  // gre + erspan headers
             ErspanType::Type3
-        },
+        }
         _ => ErspanType::Unknown
     };
     let vlan = version_and_vlan & 0x0FFF;
 
-    let gre_header_rest = rdr.read_u16::<BigEndian>().unwrap();
+    let gre_header_rest = rdr.read_u16::<BigEndian>().map_err(|_| NumbersParsingError)?;
     let cos = (gre_header_rest >> 13) as u8;  // & 0b1110_0000_0000_0000;
     let encap_type = (gre_header_rest >> 11) as u8;   // & 0b0001_1000_0000_0000;
-    let truncated = (gre_header_rest  >> 10) == 1; // & 0b0000_0100_0000_0000) > 0;
+    let truncated = (gre_header_rest >> 10) == 1; // & 0b0000_0100_0000_0000) > 0;
     let session_id = gre_header_rest & 0b0000_0011_1111_1111;
 
-    let gre_header_rest2 = rdr.read_u64::<BigEndian>().unwrap();
+    let gre_header_rest2 = rdr.read_u64::<BigEndian>().map_err(|_| NumbersParsingError)?;
     let port_index = (gre_header_rest2 & 0b0000_0000_0000_1111_1111_1111_1111_1111) as u32;
 
     let mut security_group_tag = None;
     if proto_type == 0x22EB {   // type III additional params
-        let _timestamp = rdr.read_u32::<BigEndian>().unwrap();
-        security_group_tag = Some(rdr.read_u16::<BigEndian>().unwrap());
+        let _timestamp = rdr.read_u32::<BigEndian>().map_err(|_| NumbersParsingError)?;
+        security_group_tag = rdr.read_u16::<BigEndian>().ok();
 
-        let second_flags = rdr.read_u16::<BigEndian>().unwrap();
+        let second_flags = rdr.read_u16::<BigEndian>().map_err(|_| NumbersParsingError)?;
 
         let optional_subheader_present = second_flags & 0b1;
 
         if optional_subheader_present == 1 {
             gre_headers_size = gre_headers_size + 8;
-            let _platform_spec_info = rdr.read_u32::<BigEndian>().unwrap();
-            let _upper_timestamp = rdr.read_u32::<BigEndian>().unwrap();  // TODO process timestamp
+            let _platform_spec_info = rdr.read_u32::<BigEndian>().map_err(|_| NumbersParsingError)?;
+            let _upper_timestamp = rdr.read_u32::<BigEndian>().map_err(|_| NumbersParsingError)?;
         }
     }
 
@@ -222,7 +226,7 @@ pub fn handle_gre_packet(source: IpAddr, destination: IpAddr, packet: &[u8]) -> 
             key_flag,
             checksum,
             key,
-            sequence_number: seq
+            sequence_number: seq,
         },
         source,
         destination,

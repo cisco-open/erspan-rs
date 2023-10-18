@@ -137,4 +137,20 @@ mod tests {
             Err(e) => assert_eq!(e, ErspanError::InvalidTransportProtocol)
         }
     }
+
+    #[test]
+    fn erspan_from_web() {
+        let packet = "6400f1e201126400f1e2010108004500009600004000fe2f76330202020201010101100088be0000070410170864000000006400f1e103036400f1e1020208004500006408940000ff0185001700000217000003080057b5001600000000000000a825d7abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd";
+        let packet_bytes = &hex::decode(packet).unwrap();
+        match erspan_decap(packet_bytes) {
+            Ok(erspan) => {
+                assert_eq!(erspan.version, ErspanType::Type2);
+                assert_eq!(erspan.source, IpAddr::from_str("2.2.2.2").unwrap());
+                assert_eq!(erspan.destination, IpAddr::from_str("1.1.1.1").unwrap());
+            }
+            Err(e) => {
+                panic!("Unexpected end")
+            }
+        }
+    }
 }
