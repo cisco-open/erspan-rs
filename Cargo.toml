@@ -23,3 +23,6 @@ pnet = "0.34.0"
 hex = "0.4.2"
 byteorder = "1.4.2"
 thiserror = "1.0.23"
+
+[dev-dependencies]
+pcap-file = "2.0.0"

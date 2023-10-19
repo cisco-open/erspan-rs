@@ -148,7 +148,41 @@ mod tests {
                 assert_eq!(erspan.source, IpAddr::from_str("2.2.2.2").unwrap());
                 assert_eq!(erspan.destination, IpAddr::from_str("1.1.1.1").unwrap());
             }
-            Err(e) => {
+            Err(_e) => {
+                panic!("Unexpected end")
+            }
+        }
+    }
+
+    #[test]
+    fn erspan_from_fs() {
+        let packet = "a0369fc7a3cd3cfdfeca59610800450000b229eb4000fe2fc8030a0021260a005508100088be106d3901100100010001005400778dce1d9500778dce1efd080045000080b8c340002006acfb0a4bdc963040dd97a10501bb22b9104c384e4e998018ffff322800000101080a02cd2ece02cd2c4616030300470100004303035d27a980b86ef5493858f553b853f54c384ef5d2b86ef5d4b86ef5dfb86ef601000004000400ff01000016000d0012001005030403020301030501040102010101";
+        let packet_bytes = &hex::decode(packet).unwrap();
+        match erspan_decap(packet_bytes) {
+            Ok(erspan) => {
+                assert_eq!(erspan.version, ErspanType::Type2);
+                assert_eq!(erspan.source, IpAddr::from_str("10.0.33.38").unwrap());
+                assert_eq!(erspan.destination, IpAddr::from_str("10.0.85.8").unwrap());
+                assert_eq!(erspan.original_data_packet.len(), 142);
+            }
+            Err(_e) => {
+                panic!("Unexpected end")
+            }
+        }
+    }
+
+    #[test]
+    fn erspan_from_fs_v6() {
+        let packet = "a0369fc7a3cd3cfdfeca596108004500007a28ce4000fe2fc9580a0021260a005508100088be1b9e3e77100100010001005400778dce1d9500778dce1efd86dd60000000002006400000000000000000000000000a52efdd0000000000000000000000003047f0e02c5c01bbe861cea5f67b003780101001ddca00000101080a0d8e92af9b545636";
+        let packet_bytes = &hex::decode(packet).unwrap();
+        match erspan_decap(packet_bytes) {
+            Ok(erspan) => {
+                assert_eq!(erspan.version, ErspanType::Type2);
+                assert_eq!(erspan.source, IpAddr::from_str("10.0.33.38").unwrap());
+                assert_eq!(erspan.destination, IpAddr::from_str("10.0.85.8").unwrap());
+                assert_eq!(erspan.original_data_packet.len(), 86);
+            }
+            Err(_e) => {
                 panic!("Unexpected end")
             }
         }
