@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: MIT
+//
+// Copyright 2023 Cisco Systems, Inc. and its affiliates
+//
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
+
+
 use std::env::args;
 use std::fs::File;
 use std::process::exit;
