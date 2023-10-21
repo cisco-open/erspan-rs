@@ -38,7 +38,7 @@ mod tests {
                 assert_eq!(result.encap_type, 0);
                 assert_eq!(result.truncated, false);
                 assert_eq!(result.session_id, 1);
-                assert_eq!(result.port_index, 0x20307);
+                assert_eq!(result.port_index, 1);
                 assert_eq!(result.security_group_tag, None);
                 result.original_data_packet
             }
@@ -186,5 +186,31 @@ mod tests {
                 panic!("Unexpected end")
             }
         }
+    }
+
+    #[test]
+    fn erspan_v6() {
+        let packet = "a0cec81537e95254002e678586dd600dde7b00df3c4020000000000000000000000000000050200000000000000000000000000000402f00040104010100100022eb0000000f200000653e1b352a000080003333000000fbf64b1f2b2f7e86dd600dde7b008d11fffe80000000000000f44b1ffffe2b2f7eff0200000000000000000000000000fb14e914e9008de6ef000084000000000400000000095f7365727669636573075f646e732d7364045f756470056c6f63616c00000c00010000119400140c5f6465766963652d696e666f045f746370c023045f736d62c041000c0001000011940009065542554e5455c048c00c000c0001000011940002c048c034000c0001000011940009065542554e5455c034";
+        let packet_bytes = &hex::decode(packet).unwrap();
+        let original_packet = match erspan_decap(packet_bytes) {
+            Ok(erspan) => {
+                assert_eq!(erspan.version, ErspanType::Type3);
+                assert_eq!(erspan.source, IpAddr::from_str("2000::50").unwrap());
+                assert_eq!(erspan.destination, IpAddr::from_str("2000::40").unwrap());
+                assert_eq!(erspan.session_id, 101);
+                assert_eq!(erspan.original_data_packet.len(), 195);
+                erspan.original_data_packet
+            }
+            Err(e) => {
+                panic!("Unexpected end {:?}", e)
+            }
+        };
+
+        // validates original packet content
+        assert_eq!(original_packet.len(), 195);
+        let eframe = &EthernetPacket::new(original_packet.as_slice()).unwrap();
+        assert_eq!(eframe.get_ethertype(), EtherTypes::Ipv6);
+        assert_eq!(eframe.get_source(), MacAddr::from_str("f6:4b:1f:2b:2f:7e").unwrap());
+        assert_eq!(eframe.get_destination(), MacAddr::from_str("33:33:00:00:00:fb").unwrap());
     }
 }

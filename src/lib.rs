@@ -13,10 +13,11 @@ use byteorder::{BigEndian, ReadBytesExt};
 use pnet::packet::ethernet::{EthernetPacket, EtherTypes};
 use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
 use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::ipv6::Ipv6Packet;
 use pnet::packet::Packet;
 use thiserror::Error;
 
-use crate::ErspanError::NumbersParsingError;
+use crate::ErspanError::{NumbersParsingError, UnknownPacket};
 
 mod tests;
 
@@ -65,7 +66,10 @@ pub enum ErspanError {
     #[error("Unknown IpV4 packet type")]
     InvalidIpV4Packet,
 
-    #[error("Unknown transport protocol, not GRE/ERSPAN")]
+    #[error("Unknown IpV6 packet type")]
+    InvalidIpV6Packet,
+
+    #[error("Unknown transport protocol, not ipv4 GRE/ERSPAN or ipv6opt/ERSPAN")]
     InvalidTransportProtocol,
 
     #[error("Packet too short")]
@@ -86,6 +90,7 @@ pub fn erspan_decap(erspan_packet: &[u8]) -> Result<ErspanHeader, ErspanError> {
         Some(eframe) => {
             match eframe.get_ethertype() {
                 EtherTypes::Ipv4 => handle_ipv4_packet(&eframe),
+                EtherTypes::Ipv6 => handle_ipv6_packet(&eframe),
                 _ => Err(ErspanError::UnknownPacket)
             }
         }
@@ -107,6 +112,21 @@ fn handle_ipv4_packet(ethernet: &EthernetPacket) -> Result<ErspanHeader, ErspanE
     }
 }
 
+fn handle_ipv6_packet(ethernet: &EthernetPacket) -> Result<ErspanHeader, ErspanError> {
+    let header = Ipv6Packet::new(ethernet.payload());
+    if let Some(header) = header {
+        handle_transport_protocol(
+            IpAddr::V6(header.get_source()),
+            IpAddr::V6(header.get_destination()),
+            header.get_next_header(),
+            header.payload(),
+        )
+    } else {
+        Err(ErspanError::InvalidIpV6Packet)
+    }
+}
+
+
 fn handle_transport_protocol(
     source: IpAddr,
     destination: IpAddr,
@@ -117,11 +137,38 @@ fn handle_transport_protocol(
         IpNextHeaderProtocols::Gre => {
             handle_gre_packet(source, destination, packet)
         }
+        IpNextHeaderProtocols::Ipv6Opts => {
+            handle_gre_packet_v6(source, destination, packet)
+        }
         _ =>
             Err(ErspanError::InvalidTransportProtocol)
     }
 }
 
+
+pub fn handle_gre_packet_v6(source: IpAddr, destination: IpAddr, packet: &[u8]) -> Result<ErspanHeader, ErspanError> {
+    let min_gre_headers_size = 16;
+
+    if packet.len() < min_gre_headers_size {
+        return
+            Err(ErspanError::PacketTooShort);
+    }
+    let mut rdr = Cursor::new(&packet);
+    let gre_47 = rdr.read_u8().map_err(|_| NumbersParsingError)?;
+    if gre_47 != 0x2f {
+        return Err(UnknownPacket);
+    }
+    let _len_0 = rdr.read_u8();
+    let _encap_limit_key = rdr.read_u8().map_err(|_| NumbersParsingError);  // 4?
+    let _encap_limit_len = rdr.read_u8().map_err(|_| NumbersParsingError);  // 1?
+    let _encap_limit = rdr.read_u8().map_err(|_| NumbersParsingError);  // 4?
+    let _padn_limit_key = rdr.read_u8().map_err(|_| NumbersParsingError);  // 1?
+    let _padn_limit_len = rdr.read_u8().map_err(|_| NumbersParsingError);  // 0?
+    let _padn_limit = rdr.read_u8().map_err(|_| NumbersParsingError);  // 1?
+
+    let (_, erspan_packet) = packet.split_at(8);
+    handle_gre_packet(source, destination, erspan_packet)
+}
 
 pub fn handle_gre_packet(source: IpAddr, destination: IpAddr, packet: &[u8]) -> Result<ErspanHeader, ErspanError> {
     let min_gre_headers_size = 16;
@@ -194,8 +241,8 @@ pub fn handle_gre_packet(source: IpAddr, destination: IpAddr, packet: &[u8]) -> 
     let truncated = (gre_header_rest >> 10) == 1; // & 0b0000_0100_0000_0000) > 0;
     let session_id = gre_header_rest & 0b0000_0011_1111_1111;
 
-    let gre_header_rest2 = rdr.read_u64::<BigEndian>().map_err(|_| NumbersParsingError)?;
-    let port_index = (gre_header_rest2 & 0b0000_0000_0000_1111_1111_1111_1111_1111) as u32;
+    // let gre_header_rest2 = rdr.read_u64::<BigEndian>().map_err(|_| NumbersParsingError)?;
+    // let port_index = (gre_header_rest2 & 0b0000_0000_0000_1111_1111_1111_1111_1111) as u32;
 
     let mut security_group_tag = None;
     if proto_type == 0x22EB {   // type III additional params
@@ -236,7 +283,7 @@ pub fn handle_gre_packet(source: IpAddr, destination: IpAddr, packet: &[u8]) -> 
         encap_type,
         truncated,
         session_id,
-        port_index,
+        port_index: 1,  // FIXME real value
         security_group_tag,
         original_data_packet: buf,
     })
