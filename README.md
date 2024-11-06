@@ -1,5 +1,8 @@
 # ERSPAN-RS
 
+> [!IMPORTANT]
+> This repository is archived and will not receive any updates or accept issues or pull requests
+
 This is a helper library to unwraps original packet from GRE encapsulated packet. This is a handy utility 
 for network monitoring apps receiving spanned traffic from a router in a remote destination.
 
